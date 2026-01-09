@@ -35,7 +35,15 @@ namespace ToolBox
                 installedTools = ["None"];
                 Console.WriteLine("    ❌ None");
             }
-            else for (int i = 0; i < installedTools.Count; i++) Console.WriteLine($"    🔧 {installedTools[i]}");
+            else
+            {
+                if (installedTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
+                for (int i = 0; i < installedTools.Count; i++)
+                {
+                    if (installedTools[i] == "ToolBox") continue;
+                    Console.WriteLine($"       🔧 {installedTools[i]}");
+                }
+            }
             Console.WriteLine(" 🚪 Exit");
             Console.WriteLine("");
         Prompt:
@@ -122,7 +130,8 @@ namespace ToolBox
             if (tokens.Count == 0) return;
             var tool = tokens[0];
             if (tool == "None") { Console.WriteLine(prompt + "None means none dumbass."); return; }
-            if (string.Equals(tool, "ToolBox", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine(prompt + "ToolBox is already running."); return; }
+            if (tool == "ToolBox") { Console.WriteLine(prompt + "ToolBox is already running."); return; }
+            if (tool == "SteeleTerm" && tokens.Any(t => t == "--serial" || t == "--ssh")) { RunPassthroughTool(tokens); return; }
             var psi = new ProcessStartInfo
             {
                 FileName = tool,
@@ -137,8 +146,8 @@ namespace ToolBox
             };
             for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i]);
             using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            const string sentinel = "🔍 Verifying parent is ToolBox";
-            const int minSpinnerMs = 1000;
+            const string sentinel = "🔍 Verifying parent is ToolBox...";
+            const int minSpinnerMs = 0;
             int acked = 0;
             int spinnerActive = 0;
             int stopScheduled = 0;
@@ -158,18 +167,18 @@ namespace ToolBox
                     int i = 0;
                     while (spinning)
                     {
-                        lock (outputLock) { try { Console.Write("\r" + prompt + "⏳ Verifying ToolBox " + frames[i++ & 3]); } catch { } }
+                        lock (outputLock) { try { Console.Write("\r" + prompt + "⏳ Waiting for ToolBox " + frames[i++ & 3] + " "); } catch { } }
                         Thread.Sleep(100);
                     }
                 }) { IsBackground = true };
-                lock (outputLock) { try { Console.Write(prompt + "⏳ Verifying ToolBox |"); } catch { } }
+                lock (outputLock) { try { Console.Write("\r" + prompt + "⏳ Waiting for ToolBox | "); } catch { } }
                 spinnerThread.Start();
             }
             void StopSpinnerAndFlush()
             {
                 if (Interlocked.Exchange(ref spinnerActive, 0) == 0) return;
                 spinning = false;
-                try { spinnerThread?.Join(200); } catch { }
+                try { spinnerThread?.Join(); } catch { }
                 lock (outputLock)
                 {
                     try { Console.Write("\r" + new string(' ', Math.Max(0, Console.BufferWidth - 1)) + "\r"); } catch { }
@@ -178,7 +187,7 @@ namespace ToolBox
                         string? line = null;
                         lock (pendingLock) { if (pending.Count > 0) line = pending.Dequeue(); }
                         if (line == null) break;
-                        Console.WriteLine(prompt + line);
+                        if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line);
                     }
                 }
             }
@@ -197,21 +206,25 @@ namespace ToolBox
             }
             p.OutputDataReceived += (_, e) => {
                 if (e.Data == null) return;
-                var trimmed = e.Data.Trim();
+                var raw = e.Data;
+                int cr = raw.LastIndexOf('\r');
+                var line = cr >= 0 ? raw[(cr + 1)..] : raw;
+                var trimmed = line.Trim();
                 if (string.Equals(trimmed, sentinel, StringComparison.Ordinal))
                 {
-                    lock (outputLock) Console.WriteLine(prompt + e.Data);
+                    lock (outputLock) { if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line); }
                     StartSpinner();
                     if (Interlocked.Exchange(ref acked, 1) == 0) { try { p.StandardInput.WriteLine("ToolBox is open"); p.StandardInput.Flush(); } catch { } }
                     return;
                 }
-                if (spinnerActive != 0) { Enqueue(e.Data); RequestStop(); return; }
-                lock (outputLock) Console.WriteLine(prompt + e.Data);
+                if (spinnerActive != 0) { Enqueue(line); RequestStop(); return; }
+                lock (outputLock) { if (Console.CursorLeft != 0) Console.WriteLine(); if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line); }
             };
             p.ErrorDataReceived += (_, e) => {
                 if (e.Data == null) return;
-                if (spinnerActive != 0) { Enqueue(e.Data); RequestStop(); return; }
-                lock (outputLock) Console.WriteLine(prompt + e.Data);
+                var line = e.Data.Replace("\r", "");
+                if (spinnerActive != 0) { Enqueue(line); RequestStop(); return; }
+                lock (outputLock) { if (Console.CursorLeft != 0) Console.WriteLine(); if (line.Length == 0) Console.WriteLine(); else Console.Error.WriteLine(prompt + line); }
             };
             try { p.Start(); }
             catch (Exception ex) { lock (outputLock) Console.WriteLine(prompt + ex.Message); return; }
@@ -331,6 +344,24 @@ namespace ToolBox
                 list.Add(s[start..i]);
             }
             return list;
+        }
+        static void RunPassthroughTool(List<string> tokens)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = tokens[0],
+                UseShellExecute = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                RedirectStandardInput = false,
+                CreateNoWindow = false
+            };
+            psi.Environment["TOOLBOX_HOST"] = "1";
+            psi.Environment["TOOLBOX_PREFIX"] = prompt;
+            for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i]);
+            using var p = Process.Start(psi);
+            if (p == null) return;
+            p.WaitForExit();
         }
     }
 }

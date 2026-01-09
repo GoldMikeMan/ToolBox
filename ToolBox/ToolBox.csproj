@@ -1,18 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-	<AssemblyName>ToolBox</AssemblyName>
-	<Authors>GoldMike</Authors>
-	<Description>Container for running my other CLI tools.</Description>
-	<ImplicitUsings>enable</ImplicitUsings>
-	<IsPackable>true</IsPackable>
-	<LangVersion>preview</LangVersion>
-	<Nullable>enable</Nullable>
-    <OutputType>Exe</OutputType>
-	<PackAsTool>true</PackAsTool>
-	<PackageId>ToolBox</PackageId>
-	<PackageOutputPath>./bin/Release/nupkg</PackageOutputPath>
-    <TargetFramework>net10.0</TargetFramework>
-	<ToolCommandName>ToolBox</ToolCommandName>
-	<Version>1.3.8</Version>
-  </PropertyGroup>
+	<PropertyGroup>
+		<AssemblyName>ToolBox</AssemblyName>
+		<Authors>GoldMike</Authors>
+		<Description>Container for running my other CLI tools.</Description>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<IsPackable>true</IsPackable>
+		<LangVersion>preview</LangVersion>
+		<Nullable>enable</Nullable>
+		<OutputType>Exe</OutputType>
+		<PackAsTool>true</PackAsTool>
+		<PackageId>ToolBox</PackageId>
+		<PackageOutputPath>./bin/Release/nupkg</PackageOutputPath>
+		<TargetFramework>net10.0</TargetFramework>
+		<ToolCommandName>ToolBox</ToolCommandName>
+		<Version>1.3.18</Version>
+	</PropertyGroup>
 </Project>
