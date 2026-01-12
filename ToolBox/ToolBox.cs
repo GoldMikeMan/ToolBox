@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Xml.Linq;
+[assembly: SupportedOSPlatform("windows")]
 namespace ToolBox
 {
     class ToolBox
@@ -15,7 +17,7 @@ namespace ToolBox
        \/_/\/___/  \/___/ \/____/ \/___/  \/___/ \//\/_/
  -------------------------------------------------------";
         static readonly string prompt = " 🧰 > ";
-        static readonly string[] allTools = ["ToolBox", "WrapHDL"];
+        static readonly string[] allTools = ["ToolBox", "SteeleTerm", "WrapHDL"];
         static readonly string[] availableCommands = ["All Tools", "Installed Tools", "Exit"];
         static readonly string author = "GoldMike";
         static List<string> installedTools = [];
@@ -29,7 +31,10 @@ namespace ToolBox
             Console.WriteLine("");
             Console.WriteLine(" 📁 All Tools");
             Console.WriteLine(" 📂 Installed Tools:");
+            var spinner = new ConsoleSpinner(outputLock, prompt, 100, 150);
+            spinner.Start("⏳ Scanning installed tools");
             installedTools = GetInstalledToolCommandsByAuthor(author);
+            spinner.StopAndFlush();
             if (installedTools.Count == 0)
             {
                 installedTools = ["None"];
@@ -37,11 +42,11 @@ namespace ToolBox
             }
             else
             {
-                if (installedTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
+                if (installedTools.Contains("ToolBox")) Console.WriteLine("   🧰 ToolBox:");
                 for (int i = 0; i < installedTools.Count; i++)
                 {
                     if (installedTools[i] == "ToolBox") continue;
-                    Console.WriteLine($"       🔧 {installedTools[i]}");
+                    Console.WriteLine($"      🔧 {installedTools[i]}");
                 }
             }
             Console.WriteLine(" 🚪 Exit");
@@ -70,7 +75,12 @@ namespace ToolBox
             {
                 Console.WriteLine();
                 Console.WriteLine(" 📂 All Tools:");
-                for (int i = 0; i < allTools.Length; i++) Console.WriteLine($"   🔧 {allTools[i]}");
+                if (allTools.Contains("ToolBox")) Console.WriteLine("   🧰 ToolBox:");
+                for (int i = 0; i < allTools.Length; i++)
+                {
+                    if (allTools[i] == "ToolBox") continue;
+                    Console.WriteLine($"      🔧 {allTools[i]}");
+                }
                 Console.WriteLine();
                 goto Prompt;
             }
@@ -147,63 +157,8 @@ namespace ToolBox
             for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i]);
             using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             const string sentinel = "🔍 Verifying parent is ToolBox...";
-            const int minSpinnerMs = 0;
+            var spinner = new ConsoleSpinner(outputLock, prompt, 100, 0);
             int acked = 0;
-            int spinnerActive = 0;
-            int stopScheduled = 0;
-            long spinnerStartedAt = 0;
-            bool spinning = false;
-            Thread? spinnerThread = null;
-            var pending = new Queue<string>();
-            object pendingLock = new();
-            void Enqueue(string line) { lock (pendingLock) pending.Enqueue(line); }
-            void StartSpinner()
-            {
-                if (Interlocked.Exchange(ref spinnerActive, 1) != 0) return;
-                spinnerStartedAt = Environment.TickCount64;
-                spinning = true;
-                spinnerThread = new Thread(() => {
-                    char[] frames = ['|', '/', '-', '\\'];
-                    int i = 0;
-                    while (spinning)
-                    {
-                        lock (outputLock) { try { Console.Write("\r" + prompt + "⏳ Waiting for ToolBox " + frames[i++ & 3] + " "); } catch { } }
-                        Thread.Sleep(100);
-                    }
-                }) { IsBackground = true };
-                lock (outputLock) { try { Console.Write("\r" + prompt + "⏳ Waiting for ToolBox | "); } catch { } }
-                spinnerThread.Start();
-            }
-            void StopSpinnerAndFlush()
-            {
-                if (Interlocked.Exchange(ref spinnerActive, 0) == 0) return;
-                spinning = false;
-                try { spinnerThread?.Join(); } catch { }
-                lock (outputLock)
-                {
-                    try { Console.Write("\r" + new string(' ', Math.Max(0, Console.BufferWidth - 1)) + "\r"); } catch { }
-                    while (true)
-                    {
-                        string? line = null;
-                        lock (pendingLock) { if (pending.Count > 0) line = pending.Dequeue(); }
-                        if (line == null) break;
-                        if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line);
-                    }
-                }
-            }
-            void RequestStop()
-            {
-                if (spinnerActive == 0) return;
-                long elapsed = Environment.TickCount64 - spinnerStartedAt;
-                if (elapsed >= minSpinnerMs) { StopSpinnerAndFlush(); return; }
-                if (Interlocked.Exchange(ref stopScheduled, 1) != 0) return;
-                Task.Run(() => {
-                    int wait = (int)Math.Max(0, minSpinnerMs - (Environment.TickCount64 - spinnerStartedAt));
-                    if (wait > 0) Thread.Sleep(wait);
-                    Interlocked.Exchange(ref stopScheduled, 0);
-                    StopSpinnerAndFlush();
-                });
-            }
             p.OutputDataReceived += (_, e) => {
                 if (e.Data == null) return;
                 var raw = e.Data;
@@ -213,25 +168,25 @@ namespace ToolBox
                 if (string.Equals(trimmed, sentinel, StringComparison.Ordinal))
                 {
                     lock (outputLock) { if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line); }
-                    StartSpinner();
+                    spinner.Start("⏳ Waiting for ToolBox");
                     if (Interlocked.Exchange(ref acked, 1) == 0) { try { p.StandardInput.WriteLine("ToolBox is open"); p.StandardInput.Flush(); } catch { } }
                     return;
                 }
-                if (spinnerActive != 0) { Enqueue(line); RequestStop(); return; }
+                if (spinner.Active) { spinner.Enqueue(line, false); spinner.RequestStopAndFlush(); return; }
                 lock (outputLock) { if (Console.CursorLeft != 0) Console.WriteLine(); if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line); }
             };
             p.ErrorDataReceived += (_, e) => {
                 if (e.Data == null) return;
                 var line = e.Data.Replace("\r", "");
-                if (spinnerActive != 0) { Enqueue(line); RequestStop(); return; }
+                if (spinner.Active) { spinner.Enqueue(line, true); spinner.RequestStopAndFlush(); return; }
                 lock (outputLock) { if (Console.CursorLeft != 0) Console.WriteLine(); if (line.Length == 0) Console.WriteLine(); else Console.Error.WriteLine(prompt + line); }
             };
             try { p.Start(); }
             catch (Exception ex) { lock (outputLock) Console.WriteLine(prompt + ex.Message); return; }
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            p.WaitForExit();
-            StopSpinnerAndFlush();
+            try { p.WaitForExit(); }
+            finally { spinner.StopAndFlush(); }
         }
         static List<string> Tokenise(string input)
         {
@@ -362,6 +317,77 @@ namespace ToolBox
             using var p = Process.Start(psi);
             if (p == null) return;
             p.WaitForExit();
+        }
+    }
+    sealed class ConsoleSpinner(Lock outputLock, string prefix, int intervalMs = 100, int minSpinnerMs = 0)
+    {
+        readonly Lock outputLock = outputLock;
+        readonly string prefix = prefix;
+        readonly int intervalMs = intervalMs;
+        readonly int minSpinnerMs = minSpinnerMs;
+        readonly Queue<(string Line, bool IsErr)> pending = new();
+        readonly Lock pendingLock = new();
+        Thread? spinnerThread;
+        volatile bool spinning;
+        long spinnerStartedAt;
+        int active;
+        int stopScheduled;
+        string text = "";
+        bool cursorOldVisible;
+        bool cursorCaptured;
+        public bool Active => Volatile.Read(ref active) != 0;
+        public void Start(string text)
+        {
+            if (Console.IsOutputRedirected) return;
+            if (Interlocked.Exchange(ref active, 1) != 0) return;
+            this.text = text;
+            spinnerStartedAt = Environment.TickCount64;
+            try { cursorOldVisible = Console.CursorVisible; Console.CursorVisible = false; cursorCaptured = true; } catch { cursorCaptured = false; }
+            spinning = true;
+            spinnerThread = new Thread(() => {
+                char[] frames = ['|', '/', '-', '\\'];
+                int i = 0;
+                while (spinning)
+                {
+                    lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " " + frames[i++ & 3] + " "); } catch { } }
+                    Thread.Sleep(intervalMs);
+                }
+            })
+            { IsBackground = true };
+            lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " | "); } catch { } }
+            spinnerThread.Start();
+        }
+        public void Enqueue(string line, bool isErr) { lock (pendingLock) pending.Enqueue((line, isErr)); }
+        public void RequestStopAndFlush()
+        {
+            if (!Active) return;
+            long elapsed = Environment.TickCount64 - spinnerStartedAt;
+            if (elapsed >= minSpinnerMs) { StopAndFlush(); return; }
+            if (Interlocked.Exchange(ref stopScheduled, 1) != 0) return;
+            Task.Run(() => {
+                int wait = (int)Math.Max(0, minSpinnerMs - (Environment.TickCount64 - spinnerStartedAt));
+                if (wait > 0) Thread.Sleep(wait);
+                Interlocked.Exchange(ref stopScheduled, 0);
+                StopAndFlush();
+            });
+        }
+        public void StopAndFlush()
+        {
+            if (Interlocked.Exchange(ref active, 0) == 0) return;
+            spinning = false;
+            try { spinnerThread?.Join(); } catch { }
+            if (cursorCaptured) { try { Console.CursorVisible = cursorOldVisible; } catch { } cursorCaptured = false; }
+            lock (outputLock)
+            {
+                try { Console.Write("\r" + new string(' ', Math.Max(0, Console.BufferWidth - 1)) + "\r"); } catch { try { Console.Write("\r"); } catch { } }
+                while (true)
+                {
+                    (string Line, bool IsErr) item;
+                    lock (pendingLock) { if (pending.Count == 0) break; item = pending.Dequeue(); }
+                    if (item.Line.Length == 0) { if (item.IsErr) Console.Error.WriteLine(); else Console.WriteLine(); }
+                    else { if (item.IsErr) Console.Error.WriteLine(prefix + item.Line); else Console.WriteLine(prefix + item.Line); }
+                }
+            }
         }
     }
 }
