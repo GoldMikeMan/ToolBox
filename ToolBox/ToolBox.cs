@@ -18,14 +18,14 @@ namespace ToolBox
  -------------------------------------------------------";
         static readonly string prompt = " 🧰 > ";
         static readonly string[] allTools = ["ToolBox", "SteeleTerm", "WrapHDL"];
-        static readonly string[] availableCommands = ["All Tools", "Installed Tools", "Exit"];
+        static readonly string[] availableCommands = ["Reset", "Help", "All Tools", "Installed Tools", "Exit"];
         static readonly string author = "GoldMike";
         static List<string> installedTools = [];
         static readonly Lock outputLock = new();
         static void Main()
         {
+        Reset:
             Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.Clear();
             Console.WriteLine(header);
             Console.WriteLine($" Ver {GetToolVersion()}");
             Console.WriteLine("");
@@ -42,11 +42,11 @@ namespace ToolBox
             }
             else
             {
-                if (installedTools.Contains("ToolBox")) Console.WriteLine("   🧰 ToolBox:");
+                if (installedTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
                 for (int i = 0; i < installedTools.Count; i++)
                 {
                     if (installedTools[i] == "ToolBox") continue;
-                    Console.WriteLine($"      🔧 {installedTools[i]}");
+                    Console.WriteLine($"       🔧 {installedTools[i]}");
                 }
             }
             Console.WriteLine(" 🚪 Exit");
@@ -71,15 +71,28 @@ namespace ToolBox
                 ClearLine(lineTop);
                 goto Prompt;
             }
-            if (input == "All Tools")
+            if (input == "Reset") goto Reset;
+            else if (input == "Help")
+            {
+                Console.WriteLine();
+                Console.WriteLine(" 🆘 Help:");
+                Console.WriteLine("    ⌨️ Type the name of an installed tool followed by any arguments to run it.");
+                Console.WriteLine("    ⌨️ Type 'All Tools' to see all available tools.");
+                Console.WriteLine("    ⌨️ Type 'Installed Tools' to see all installed tools.");
+                Console.WriteLine("    ⌨️ Type 'Reset' to reset ToolBox.");
+                Console.WriteLine("    ⌨️ Type 'Exit' to close ToolBox.");
+                Console.WriteLine();
+                goto Prompt;
+            }
+            else if (input == "All Tools")
             {
                 Console.WriteLine();
                 Console.WriteLine(" 📂 All Tools:");
-                if (allTools.Contains("ToolBox")) Console.WriteLine("   🧰 ToolBox:");
+                if (allTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
                 for (int i = 0; i < allTools.Length; i++)
                 {
                     if (allTools[i] == "ToolBox") continue;
-                    Console.WriteLine($"      🔧 {allTools[i]}");
+                    Console.WriteLine($"       🔧 {allTools[i]}");
                 }
                 Console.WriteLine();
                 goto Prompt;
@@ -111,12 +124,17 @@ namespace ToolBox
             var tools = GetInstalledGlobalTools().Where(t => PackageAuthorsContainExact(t.PackageId, t.Version, authorExact)).SelectMany(t => t.Commands).Distinct().OrderBy(x => x).ToList();
             if (tools.Count == 0)
             {
-                Console.WriteLine(" Installed Tools:");
-                Console.WriteLine("  - None");
+                Console.WriteLine(" 📂 Installed Tools:");
+                Console.WriteLine("    🚫 None");
                 return;
             }
-            Console.WriteLine(" Installed Tools:");
-            for (int i = 0; i < tools.Count; i++) Console.WriteLine($" - {tools[i]}");
+            Console.WriteLine(" 📂 Installed Tools:");
+            if (installedTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
+            for (int i = 0; i < allTools.Length; i++)
+            {
+                if (installedTools[i] == "ToolBox") continue;
+                Console.WriteLine($"       🔧 {allTools[i]}");
+            }
         }
         static List<string> GetInstalledToolCommandsByAuthor(string authorExact)
         {
