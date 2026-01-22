@@ -22,6 +22,7 @@ namespace ToolBox
         static readonly string author = "GoldMike";
         static List<string> installedTools = [];
         static readonly Lock outputLock = new();
+        public Dictionary<int, string> AutocompleteDictionary = [];
         static void Main()
         {
         Reset:
@@ -34,6 +35,7 @@ namespace ToolBox
             var spinner = new ConsoleSpinner(outputLock, prompt, 100, 150);
             spinner.Start("⏳ Scanning installed tools");
             installedTools = GetInstalledToolCommandsByAuthor(author);
+            Autocomplete(installedTools);
             spinner.StopAndFlush();
             if (installedTools.Count == 0)
             {
@@ -75,12 +77,14 @@ namespace ToolBox
             else if (input == "Help")
             {
                 Console.WriteLine();
-                Console.WriteLine(" 🆘 Help:");
-                Console.WriteLine("    ⌨️ Type the name of an installed tool followed by any arguments to run it.");
-                Console.WriteLine("    ⌨️ Type 'All Tools' to see all available tools.");
-                Console.WriteLine("    ⌨️ Type 'Installed Tools' to see all installed tools.");
-                Console.WriteLine("    ⌨️ Type 'Reset' to reset ToolBox.");
-                Console.WriteLine("    ⌨️ Type 'Exit' to close ToolBox.");
+                Console.WriteLine("      ToolBox Commands:");
+                Console.WriteLine("        \'Help\'                                Print help to console.");
+                Console.WriteLine("        \'All Tools\'                           List all available tools.");
+                Console.WriteLine("        \'Installed Tools\'                     List all installed tools.");
+                Console.WriteLine("        \'Reset\'                               Reloads ToolBox.");
+                Console.WriteLine("        \'Exit\'                                Close ToolBox.");
+                Console.WriteLine();
+                Console.WriteLine("      For dedicated tool help use \'<toolname> --help\'");
                 Console.WriteLine();
                 goto Prompt;
             }
@@ -159,7 +163,7 @@ namespace ToolBox
             var tool = tokens[0];
             if (tool == "None") { Console.WriteLine(prompt + "None means none dumbass."); return; }
             if (tool == "ToolBox") { Console.WriteLine(prompt + "ToolBox is already running."); return; }
-            if (tool == "SteeleTerm" && tokens.Any(t => t == "--serial" || t == "--ssh")) { RunPassthroughTool(tokens); return; }
+            if (tool == "SteeleTerm" && tokens.Any(t => t == "--fileBrowser" || t == "--serial" || t == "--ssh")) { RunPassthroughTool(tokens); return; }
             var psi = new ProcessStartInfo
             {
                 FileName = tool,
@@ -335,6 +339,40 @@ namespace ToolBox
             using var p = Process.Start(psi);
             if (p == null) return;
             p.WaitForExit();
+        }
+        static readonly Dictionary<string, string[]> autocomplete = new(StringComparer.Ordinal);
+        static void Autocomplete(List<string> installedTools)
+        {
+            autocomplete.Clear();
+            autocomplete["ToolBox"] = availableCommands;
+            if (installedTools == null || installedTools.Count == 0) return;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < installedTools.Count; i++)
+            {
+                var cmd = installedTools[i];
+                if (string.IsNullOrWhiteSpace(cmd) || cmd == "None") continue;
+                if (!seen.Add(cmd)) continue;
+                if (cmd == "ToolBox") continue;
+                string text = "";
+                try { text = RunAndCapture(cmd, "--help"); } catch { continue; }
+                if (string.IsNullOrWhiteSpace(text)) { autocomplete[cmd] = []; continue; }
+                var set = new HashSet<string>(StringComparer.Ordinal);
+                for (int j = 0; j < text.Length; j++)
+                {
+                    if (text[j] != '-' || j + 1 >= text.Length || text[j + 1] != '-') continue;
+                    int start = j;
+                    j += 2;
+                    while (j < text.Length)
+                    {
+                        char c = text[j];
+                        if (char.IsLetterOrDigit(c) || c == '-' || c == '_') { j++; continue; }
+                        break;
+                    }
+                    var flag = text[start..j];
+                    if (flag.Length > 2) set.Add(flag);
+                }
+                autocomplete[cmd] = [.. set.OrderBy(x => x, StringComparer.Ordinal)];
+            }
         }
     }
     sealed class ConsoleSpinner(Lock outputLock, string prefix, int intervalMs = 100, int minSpinnerMs = 0)
