@@ -18,11 +18,15 @@ namespace ToolBox
  -------------------------------------------------------";
         static readonly string prompt = " 🧰 > ";
         static readonly string[] allTools = ["ToolBox", "SteeleTerm", "WrapHDL"];
-        static readonly string[] availableCommands = ["Reset", "Help", "All Tools", "Installed Tools", "Exit"];
         static readonly string author = "GoldMike";
-        static List<string> installedTools = [];
         static readonly Lock outputLock = new();
-        public Dictionary<int, string> AutocompleteDictionary = [];
+        static List<string> installedTools = [];
+        static readonly string[] availableCommands = ["allTools", "exit", "help", "installedTools", "reset"];
+        static readonly Dictionary<string, string[]> argsPrimary = new(StringComparer.Ordinal);
+        static readonly Dictionary<string, string[]> argsSecondary = new(StringComparer.Ordinal);
+        static readonly Dictionary<string, string[]> argsSecondaryUpdate = new(StringComparer.Ordinal) { ["--update"] = ["--forceUpdate"], ["--updateMajor"] = ["--forceUpdate"], ["--updateMinor"] = ["--forceUpdate"] };
+        static readonly Dictionary<string, string[]> argsTertiary = new(StringComparer.Ordinal);
+        static readonly Dictionary<string, string[]> argsTertiaryUpdate = new(StringComparer.Ordinal) { ["--forceUpdate"] = ["--skipVersion"] };
         static void Main()
         {
         Reset:
@@ -35,7 +39,8 @@ namespace ToolBox
             var spinner = new ConsoleSpinner(outputLock, prompt, 100, 150);
             spinner.Start("⏳ Scanning installed tools");
             installedTools = GetInstalledToolCommandsByAuthor(author);
-            Autocomplete(installedTools);
+            BuildAutocomplete(installedTools);
+            Console.WriteLine(" 🔍 Autocomplete Dictionary:");
             spinner.StopAndFlush();
             if (installedTools.Count == 0)
             {
@@ -56,7 +61,7 @@ namespace ToolBox
         Prompt:
             int lineTop = Console.CursorTop;
             Console.Write(prompt);
-            string? input = Console.ReadLine();
+            string? input = Autocomplete();
             if (input == null)
             {
                 ClearLine(lineTop);
@@ -78,11 +83,11 @@ namespace ToolBox
             {
                 Console.WriteLine();
                 Console.WriteLine("      ToolBox Commands:");
-                Console.WriteLine("        \'Help\'                                Print help to console.");
-                Console.WriteLine("        \'All Tools\'                           List all available tools.");
-                Console.WriteLine("        \'Installed Tools\'                     List all installed tools.");
-                Console.WriteLine("        \'Reset\'                               Reloads ToolBox.");
-                Console.WriteLine("        \'Exit\'                                Close ToolBox.");
+                Console.WriteLine("        \'allTools\'                            List all available tools.");
+                Console.WriteLine("        \'exit\'                                Close ToolBox.");
+                Console.WriteLine("        \'help\'                                Print help to console.");
+                Console.WriteLine("        \'installedTools\'                      List all installed tools.");
+                Console.WriteLine("        \'reset\'                               Reloads ToolBox.");
                 Console.WriteLine();
                 Console.WriteLine("      For dedicated tool help use \'<toolname> --help\'");
                 Console.WriteLine();
@@ -110,6 +115,42 @@ namespace ToolBox
             }
             else if (input == "Exit") return;
         }
+        static string Autocomplete()
+        {
+            string currentInput = "";
+            while (true)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(true);
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (currentInput.Length > 0)
+                    {
+                        currentInput = currentInput[..^1];
+                        Console.Write("\b \b");
+                    }
+                }
+                else if (key.Key == ConsoleKey.Enter)
+                {
+                    Console.WriteLine();
+                    return currentInput;
+                }
+                else if (key.Key == ConsoleKey.Tab)
+                {
+                    var matches = installedTools.Where(t => (t.StartsWith(currentInput, StringComparison.Ordinal)) || t.StartsWith(currentInput, StringComparison.Ordinal)).ToList();
+                    if (matches.Count >= 1)
+                    {
+                        ClearLine(Console.CursorTop);
+                        string ghost = matches[0];
+                        Console.Write(prompt + currentInput + ghost);
+                    }
+                }
+                else
+                {
+                    currentInput += key.KeyChar;
+                    Console.Write(key.KeyChar);
+                }
+            }
+        }
         static bool IsValidCommand(string input)
         {
             if (input == null) return false;
@@ -134,7 +175,7 @@ namespace ToolBox
             }
             Console.WriteLine(" 📂 Installed Tools:");
             if (installedTools.Contains("ToolBox")) Console.WriteLine("    🧰 ToolBox:");
-            for (int i = 0; i < allTools.Length; i++)
+            for (int i = 0; i < installedTools.Count; i++)
             {
                 if (installedTools[i] == "ToolBox") continue;
                 Console.WriteLine($"       🔧 {allTools[i]}");
@@ -181,7 +222,8 @@ namespace ToolBox
             const string sentinel = "🔍 Verifying parent is ToolBox...";
             var spinner = new ConsoleSpinner(outputLock, prompt, 100, 0);
             int acked = 0;
-            p.OutputDataReceived += (_, e) => {
+            p.OutputDataReceived += (_, e) =>
+            {
                 if (e.Data == null) return;
                 var raw = e.Data;
                 int cr = raw.LastIndexOf('\r');
@@ -197,7 +239,8 @@ namespace ToolBox
                 if (spinner.Active) { spinner.Enqueue(line, false); spinner.RequestStopAndFlush(); return; }
                 lock (outputLock) { if (Console.CursorLeft != 0) Console.WriteLine(); if (line.Length == 0) Console.WriteLine(); else Console.WriteLine(prompt + line); }
             };
-            p.ErrorDataReceived += (_, e) => {
+            p.ErrorDataReceived += (_, e) =>
+            {
                 if (e.Data == null) return;
                 var line = e.Data.Replace("\r", "");
                 if (spinner.Active) { spinner.Enqueue(line, true); spinner.RequestStopAndFlush(); return; }
@@ -340,11 +383,8 @@ namespace ToolBox
             if (p == null) return;
             p.WaitForExit();
         }
-        static readonly Dictionary<string, string[]> autocomplete = new(StringComparer.Ordinal);
-        static void Autocomplete(List<string> installedTools)
+        static void BuildAutocomplete(List<string> installedTools)
         {
-            autocomplete.Clear();
-            autocomplete["ToolBox"] = availableCommands;
             if (installedTools == null || installedTools.Count == 0) return;
             var seen = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < installedTools.Count; i++)
@@ -355,93 +395,158 @@ namespace ToolBox
                 if (cmd == "ToolBox") continue;
                 string text = "";
                 try { text = RunAndCapture(cmd, "--help"); } catch { continue; }
-                if (string.IsNullOrWhiteSpace(text)) { autocomplete[cmd] = []; continue; }
-                var set = new HashSet<string>(StringComparer.Ordinal);
-                for (int j = 0; j < text.Length; j++)
-                {
-                    if (text[j] != '-' || j + 1 >= text.Length || text[j + 1] != '-') continue;
-                    int start = j;
-                    j += 2;
-                    while (j < text.Length)
-                    {
-                        char c = text[j];
-                        if (char.IsLetterOrDigit(c) || c == '-' || c == '_') { j++; continue; }
-                        break;
-                    }
-                    var flag = text[start..j];
-                    if (flag.Length > 2) set.Add(flag);
-                }
-                autocomplete[cmd] = [.. set.OrderBy(x => x, StringComparer.Ordinal)];
-            }
-        }
-    }
-    sealed class ConsoleSpinner(Lock outputLock, string prefix, int intervalMs = 100, int minSpinnerMs = 0)
-    {
-        readonly Lock outputLock = outputLock;
-        readonly string prefix = prefix;
-        readonly int intervalMs = intervalMs;
-        readonly int minSpinnerMs = minSpinnerMs;
-        readonly Queue<(string Line, bool IsErr)> pending = new();
-        readonly Lock pendingLock = new();
-        Thread? spinnerThread;
-        volatile bool spinning;
-        long spinnerStartedAt;
-        int active;
-        int stopScheduled;
-        string text = "";
-        bool cursorOldVisible;
-        bool cursorCaptured;
-        public bool Active => Volatile.Read(ref active) != 0;
-        public void Start(string text)
-        {
-            if (Console.IsOutputRedirected) return;
-            if (Interlocked.Exchange(ref active, 1) != 0) return;
-            this.text = text;
-            spinnerStartedAt = Environment.TickCount64;
-            try { cursorOldVisible = Console.CursorVisible; Console.CursorVisible = false; cursorCaptured = true; } catch { cursorCaptured = false; }
-            spinning = true;
-            spinnerThread = new Thread(() => {
-                char[] frames = ['|', '/', '-', '\\'];
-                int i = 0;
-                while (spinning)
-                {
-                    lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " " + frames[i++ & 3] + " "); } catch { } }
-                    Thread.Sleep(intervalMs);
-                }
-            })
-            { IsBackground = true };
-            lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " | "); } catch { } }
-            spinnerThread.Start();
-        }
-        public void Enqueue(string line, bool isErr) { lock (pendingLock) pending.Enqueue((line, isErr)); }
-        public void RequestStopAndFlush()
-        {
-            if (!Active) return;
-            long elapsed = Environment.TickCount64 - spinnerStartedAt;
-            if (elapsed >= minSpinnerMs) { StopAndFlush(); return; }
-            if (Interlocked.Exchange(ref stopScheduled, 1) != 0) return;
-            Task.Run(() => {
-                int wait = (int)Math.Max(0, minSpinnerMs - (Environment.TickCount64 - spinnerStartedAt));
-                if (wait > 0) Thread.Sleep(wait);
-                Interlocked.Exchange(ref stopScheduled, 0);
-                StopAndFlush();
-            });
-        }
-        public void StopAndFlush()
-        {
-            if (Interlocked.Exchange(ref active, 0) == 0) return;
-            spinning = false;
-            try { spinnerThread?.Join(); } catch { }
-            if (cursorCaptured) { try { Console.CursorVisible = cursorOldVisible; } catch { } cursorCaptured = false; }
-            lock (outputLock)
-            {
-                try { Console.Write("\r" + new string(' ', Math.Max(0, Console.BufferWidth - 1)) + "\r"); } catch { try { Console.Write("\r"); } catch { } }
+                if (string.IsNullOrWhiteSpace(text)) { continue; }
+                using StringReader currentLine = new(text);
                 while (true)
                 {
-                    (string Line, bool IsErr) item;
-                    lock (pendingLock) { if (pending.Count == 0) break; item = pending.Dequeue(); }
-                    if (item.Line.Length == 0) { if (item.IsErr) Console.Error.WriteLine(); else Console.WriteLine(); }
-                    else { if (item.IsErr) Console.Error.WriteLine(prefix + item.Line); else Console.WriteLine(prefix + item.Line); }
+                    var autocompleteDictionary = "";
+                    int argStart;
+                    int argEnd;
+                    List<string> args = [];
+                    string updateArgCheck;
+                    var line = currentLine.ReadLine();
+                    if (line == null) break;
+                    line = line.Trim();
+                    if (line.Length == 0) continue;
+                    if (line.StartsWith("Primary args:", StringComparison.Ordinal)) autocompleteDictionary = "Primary";
+                    while (autocompleteDictionary == "Primary")
+                    {
+                        line = currentLine.ReadLine();
+                        if (line == null) break;
+                        line = line.Trim();
+                        if (line.Length == 0) { continue; }
+                        argStart = line.IndexOf('-');
+                        if (argStart != -1)
+                        {
+                            argEnd = line.IndexOf(' ', argStart);
+                            args.Add(line[argStart..argEnd]);
+                        }
+                        if (line.StartsWith("Secondary args:", StringComparison.Ordinal))
+                        {
+                            args = [.. args.OrderBy(x => x, StringComparer.Ordinal)];
+                            argsPrimary[cmd] = [.. args];
+                            args.Clear();
+                            autocompleteDictionary = "Secondary";
+                            break;
+                        }
+                    }
+                    while (autocompleteDictionary == "Secondary")
+                    {
+                        line = currentLine.ReadLine();
+                        if (line == null) break;
+                        line = line.Trim();
+                        if (line.Length == 0) { continue; }
+                        argStart = line.IndexOf('-');
+                        if (argStart != -1)
+                        {
+                            argEnd = line.IndexOf(' ', argStart);
+                            updateArgCheck = line[argStart..argEnd];
+                            if (updateArgCheck == "--forceUpdate") continue;
+                            args.Add(line[argStart..argEnd]);
+                        }
+                        if (line.StartsWith("Tertiary args:", StringComparison.Ordinal))
+                        {
+                            args = [.. args.OrderBy(x => x, StringComparer.Ordinal)];
+                            argsSecondary[cmd] = [.. args];
+                            args.Clear();
+                            autocompleteDictionary = "Tertiary";
+                            break;
+                        }
+                    }
+                    while (autocompleteDictionary == "Tertiary")
+                    {
+                        line = currentLine.ReadLine();
+                        if (line == null) break;
+                        line = line.Trim();
+                        if (line.Length == 0) { continue; }
+                        argStart = line.IndexOf('-');
+                        if (argStart != -1)
+                        {
+                            argEnd = line.IndexOf(' ', argStart);
+                            updateArgCheck = line[argStart..argEnd];
+                            if (updateArgCheck == "--skipVersion") continue;
+                            args.Add(line[argStart..argEnd]);
+                        }
+                    }
+                    if (autocompleteDictionary == "Tertiary")
+                    {
+                        args = [.. args.OrderBy(x => x, StringComparer.Ordinal)];
+                        argsTertiary[cmd] = [.. args];
+                        args.Clear();
+                        break;
+                    }
+                }
+            }
+        }
+        sealed class ConsoleSpinner(Lock outputLock, string prefix, int intervalMs = 100, int minSpinnerMs = 0)
+        {
+            readonly Lock outputLock = outputLock;
+            readonly string prefix = prefix;
+            readonly int intervalMs = intervalMs;
+            readonly int minSpinnerMs = minSpinnerMs;
+            readonly Queue<(string Line, bool IsErr)> pending = new();
+            readonly Lock pendingLock = new();
+            Thread? spinnerThread;
+            volatile bool spinning;
+            long spinnerStartedAt;
+            int active;
+            int stopScheduled;
+            string text = "";
+            bool cursorOldVisible;
+            bool cursorCaptured;
+            public bool Active => Volatile.Read(ref active) != 0;
+            public void Start(string text)
+            {
+                if (Console.IsOutputRedirected) return;
+                if (Interlocked.Exchange(ref active, 1) != 0) return;
+                this.text = text;
+                spinnerStartedAt = Environment.TickCount64;
+                try { cursorOldVisible = Console.CursorVisible; Console.CursorVisible = false; cursorCaptured = true; } catch { cursorCaptured = false; }
+                spinning = true;
+                spinnerThread = new Thread(() =>
+                {
+                    char[] frames = ['|', '/', '-', '\\'];
+                    int i = 0;
+                    while (spinning)
+                    {
+                        lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " " + frames[i++ & 3] + " "); } catch { } }
+                        Thread.Sleep(intervalMs);
+                    }
+                }) { IsBackground = true };
+                lock (outputLock) { try { Console.Write("\r" + prefix + this.text + " | "); } catch { } }
+                spinnerThread.Start();
+            }
+            public void Enqueue(string line, bool isErr) { lock (pendingLock) pending.Enqueue((line, isErr)); }
+            public void RequestStopAndFlush()
+            {
+                if (!Active) return;
+                long elapsed = Environment.TickCount64 - spinnerStartedAt;
+                if (elapsed >= minSpinnerMs) { StopAndFlush(); return; }
+                if (Interlocked.Exchange(ref stopScheduled, 1) != 0) return;
+                Task.Run(() =>
+                {
+                    int wait = (int)Math.Max(0, minSpinnerMs - (Environment.TickCount64 - spinnerStartedAt));
+                    if (wait > 0) Thread.Sleep(wait);
+                    Interlocked.Exchange(ref stopScheduled, 0);
+                    StopAndFlush();
+                });
+            }
+            public void StopAndFlush()
+            {
+                if (Interlocked.Exchange(ref active, 0) == 0) return;
+                spinning = false;
+                try { spinnerThread?.Join(); } catch { }
+                if (cursorCaptured) { try { Console.CursorVisible = cursorOldVisible; } catch { } cursorCaptured = false; }
+                lock (outputLock)
+                {
+                    try { Console.Write("\r" + new string(' ', Math.Max(0, Console.BufferWidth - 1)) + "\r"); } catch { try { Console.Write("\r"); } catch { } }
+                    while (true)
+                    {
+                        (string Line, bool IsErr) item;
+                        lock (pendingLock) { if (pending.Count == 0) break; item = pending.Dequeue(); }
+                        if (item.Line.Length == 0) { if (item.IsErr) Console.Error.WriteLine(); else Console.WriteLine(); }
+                        else { if (item.IsErr) Console.Error.WriteLine(prefix + item.Line); else Console.WriteLine(prefix + item.Line); }
+                    }
                 }
             }
         }
