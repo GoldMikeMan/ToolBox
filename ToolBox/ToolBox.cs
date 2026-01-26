@@ -21,7 +21,7 @@ namespace ToolBox
         static readonly string author = "GoldMike";
         static readonly Lock outputLock = new();
         static List<string> installedTools = [];
-        static readonly string[] availableCommands = ["allTools", "exit", "help", "installedTools", "reset"];
+        static readonly string[] availableCommands = ["AllTools", "Exit", "Help", "InstalledTools", "Reset"];
         static readonly Dictionary<string, string[]> argsPrimary = new(StringComparer.Ordinal);
         static readonly Dictionary<string, string[]> argsSecondary = new(StringComparer.Ordinal);
         static readonly Dictionary<string, string[]> argsSecondaryUpdate = new(StringComparer.Ordinal) { ["--update"] = ["--forceUpdate"], ["--updateMajor"] = ["--forceUpdate"], ["--updateMinor"] = ["--forceUpdate"] };
@@ -40,7 +40,6 @@ namespace ToolBox
             spinner.Start("⏳ Scanning installed tools");
             installedTools = GetInstalledToolCommandsByAuthor(author);
             BuildAutocomplete(installedTools);
-            Console.WriteLine(" 🔍 Autocomplete Dictionary:");
             spinner.StopAndFlush();
             if (installedTools.Count == 0)
             {
@@ -83,17 +82,17 @@ namespace ToolBox
             {
                 Console.WriteLine();
                 Console.WriteLine("      ToolBox Commands:");
-                Console.WriteLine("        \'allTools\'                            List all available tools.");
-                Console.WriteLine("        \'exit\'                                Close ToolBox.");
-                Console.WriteLine("        \'help\'                                Print help to console.");
-                Console.WriteLine("        \'installedTools\'                      List all installed tools.");
-                Console.WriteLine("        \'reset\'                               Reloads ToolBox.");
+                Console.WriteLine("        \'AllTools\'                            List all available tools.");
+                Console.WriteLine("        \'Exit\'                                Close ToolBox.");
+                Console.WriteLine("        \'Help\'                                Print help to console.");
+                Console.WriteLine("        \'InstalledTools\'                      List all installed tools.");
+                Console.WriteLine("        \'Reset\'                               Reloads ToolBox.");
                 Console.WriteLine();
                 Console.WriteLine("      For dedicated tool help use \'<toolname> --help\'");
                 Console.WriteLine();
                 goto Prompt;
             }
-            else if (input == "All Tools")
+            else if (input == "AllTools")
             {
                 Console.WriteLine();
                 Console.WriteLine(" 📂 All Tools:");
@@ -106,7 +105,7 @@ namespace ToolBox
                 Console.WriteLine();
                 goto Prompt;
             }
-            else if (input == "Installed Tools")
+            else if (input == "InstalledTools")
             {
                 Console.WriteLine();
                 PrintInstalledToolsByAuthor(author);
@@ -114,40 +113,128 @@ namespace ToolBox
                 goto Prompt;
             }
             else if (input == "Exit") return;
+            else
+            {
+                ClearLine(lineTop);
+                goto Prompt;
+            }
         }
         static string Autocomplete()
         {
             string currentInput = "";
+            string commandInput = "";
+            int arg1 = -1;
+            string argPrimaryInput = "";
+            int arg2 = -1;
+            string argSecondaryInput = "";
+            int arg3 = -1;
+            //string argTertiaryInput = "";
+            string ghost = "";
             while (true)
             {
                 ConsoleKeyInfo key = Console.ReadKey(true);
                 if (key.Key == ConsoleKey.Backspace)
                 {
+                    arg1 = arg2 = arg3 = -1;
                     if (currentInput.Length > 0)
                     {
                         currentInput = currentInput[..^1];
                         Console.Write("\b \b");
+                        if (currentInput.Length == 0)
+                        {
+                            ClearLine(Console.CursorTop);
+                            Console.Write(prompt);
+                        }
                     }
                 }
-                else if (key.Key == ConsoleKey.Enter)
+                if (key.Key == ConsoleKey.Enter)
                 {
+                    ClearLine(Console.CursorTop);
+                    Console.Write(prompt + currentInput);
                     Console.WriteLine();
                     return currentInput;
                 }
-                else if (key.Key == ConsoleKey.Tab)
+                if (key.Key == ConsoleKey.Tab)
                 {
-                    var matches = installedTools.Where(t => (t.StartsWith(currentInput, StringComparison.Ordinal)) || t.StartsWith(currentInput, StringComparison.Ordinal)).ToList();
-                    if (matches.Count >= 1)
+                    if (ghost.Length != 0)
                     {
+                        currentInput += ghost;
                         ClearLine(Console.CursorTop);
-                        string ghost = matches[0];
-                        Console.Write(prompt + currentInput + ghost);
+                        Console.Write(prompt + currentInput);
                     }
                 }
-                else
+                ghost = "";
+                if (key.KeyChar == '\0' || char.IsControl(key.KeyChar)) continue;
+                currentInput += key.KeyChar;
+                Console.Write(key.KeyChar);
+                arg1 = currentInput.IndexOf(' ');
+                if (arg1 != -1)
                 {
-                    currentInput += key.KeyChar;
-                    Console.Write(key.KeyChar);
+                    commandInput = currentInput[..arg1];
+                    arg1++;
+                    arg2 = currentInput.IndexOf(' ', arg1);
+                    if (arg2 != -1)
+                    {
+                        argPrimaryInput = currentInput[arg1..arg2];
+                        arg2++;
+                        arg3 = currentInput.IndexOf(' ', arg2);
+                        if (arg3 != -1) argSecondaryInput = currentInput[(arg2)..arg3];
+                    }
+                }
+                var commandMatches = installedTools.Where(t => t.StartsWith(currentInput, StringComparison.Ordinal)).Concat(availableCommands.Where(t => t.StartsWith(currentInput, StringComparison.Ordinal))).OrderBy(x => x, StringComparer.Ordinal);
+                var argMatchesPrimary = (argsPrimary.TryGetValue(commandInput, out var value) ? value : []).Where(x => x.StartsWith(currentInput[(commandInput.Length + 1)..].TrimStart(), StringComparison.Ordinal)).OrderBy(x => x, StringComparer.Ordinal);
+                var argMatchesSecondary = (argsSecondary.TryGetValue(argPrimaryInput, out var value2) ? value2 : []).Concat(argsSecondaryUpdate.TryGetValue(argPrimaryInput, out var value4) ? value4 : []).Where(x => x.StartsWith(currentInput[(commandInput.Length + argPrimaryInput.Length + 2)..].TrimStart(), StringComparison.Ordinal)).OrderBy(x => x, StringComparer.Ordinal);
+                var argMatchesTertiary = (argsTertiary.TryGetValue(argSecondaryInput, out var value3) ? value3 : []).Concat(argsTertiaryUpdate.TryGetValue(argSecondaryInput, out var value5) ? value5 : []).Where(x => x.StartsWith(currentInput[(commandInput.Length + argPrimaryInput.Length + argSecondaryInput.Length + 3)..].TrimStart(), StringComparison.Ordinal)).OrderBy(x => x, StringComparer.Ordinal);
+                if (commandMatches.Any())
+                {
+                    ClearLine(Console.CursorTop);
+                    ghost = commandMatches.First();
+                    ghost = ghost[currentInput.Length..];
+                    Console.Write(prompt + currentInput);
+                    var (Left, Top) = Console.GetCursorPosition();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write(ghost);
+                    Console.ResetColor();
+                    Console.SetCursorPosition(Left, Top);
+                }
+                if (arg1 != -1 && argMatchesPrimary.Any())
+                {
+                    ClearLine(Console.CursorTop);
+                    ghost = argMatchesPrimary.First();
+                    ghost = string.Concat(commandInput, ' ', ghost);
+                    ghost = ghost[currentInput.Length..];
+                    Console.Write(prompt + currentInput);
+                    var (Left, Top) = Console.GetCursorPosition();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write(ghost);
+                    Console.ResetColor();
+                    Console.SetCursorPosition(Left, Top);
+                }
+                if (arg2 != -1 && argMatchesSecondary.Any())
+                {
+                    ClearLine(Console.CursorTop);
+                    ghost = argMatchesSecondary.First();
+                    ghost = string.Concat(commandInput, ' ', argPrimaryInput, ' ', ghost);
+                    ghost = ghost[currentInput.Length..];
+                    Console.Write(prompt + currentInput);
+                    var (Left, Top) = Console.GetCursorPosition();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write(ghost);
+                    Console.ResetColor();
+                    Console.SetCursorPosition(Left, Top);
+                }
+                if (arg3 != -1 && argMatchesTertiary.Any())
+                {
+                    ClearLine(Console.CursorTop);
+                    ghost = argMatchesTertiary.First();
+                    ghost = string.Concat(commandInput, ' ', argPrimaryInput, ' ', argSecondaryInput, ' ', ghost);
+                    ghost = ghost[currentInput.Length..];
+                    Console.Write(prompt + currentInput);
+                    var (Left, Top) = Console.GetCursorPosition();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write(ghost);
+                    Console.ResetColor();
+                    Console.SetCursorPosition(Left, Top);
                 }
             }
         }
@@ -419,6 +506,7 @@ namespace ToolBox
                         if (argStart != -1)
                         {
                             argEnd = line.IndexOf(' ', argStart);
+                            if (line[argEnd - 1] == '\'') argEnd--;
                             args.Add(line[argStart..argEnd]);
                         }
                         if (line.StartsWith("Secondary args:", StringComparison.Ordinal))
@@ -440,6 +528,7 @@ namespace ToolBox
                         if (argStart != -1)
                         {
                             argEnd = line.IndexOf(' ', argStart);
+                            if (line[argEnd - 1] == '\'') argEnd--;
                             updateArgCheck = line[argStart..argEnd];
                             if (updateArgCheck == "--forceUpdate") continue;
                             args.Add(line[argStart..argEnd]);
@@ -463,6 +552,7 @@ namespace ToolBox
                         if (argStart != -1)
                         {
                             argEnd = line.IndexOf(' ', argStart);
+                            if (line[argEnd - 1] == '\'') argEnd--;
                             updateArgCheck = line[argStart..argEnd];
                             if (updateArgCheck == "--skipVersion") continue;
                             args.Add(line[argStart..argEnd]);
