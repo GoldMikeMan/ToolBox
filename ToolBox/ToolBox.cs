@@ -2,6 +2,7 @@
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Xml.Linq;
+using ToolBox.CommaSeparatedRingBuffer;
 [assembly: SupportedOSPlatform("windows")]
 namespace ToolBox
 {
@@ -27,6 +28,7 @@ namespace ToolBox
         static readonly Dictionary<string, string[]> argsSecondaryUpdate = new(StringComparer.Ordinal) { ["--update"] = ["--forceUpdate"], ["--updateMajor"] = ["--forceUpdate"], ["--updateMinor"] = ["--forceUpdate"] };
         static readonly Dictionary<string, string[]> argsTertiary = new(StringComparer.Ordinal);
         static readonly Dictionary<string, string[]> argsTertiaryUpdate = new(StringComparer.Ordinal) { ["--forceUpdate"] = ["--skipVersion"] };
+        static List<string> commandHistory = [];
         static void Main()
         {
         Reset:
@@ -40,6 +42,8 @@ namespace ToolBox
             spinner.Start("⏳ Scanning installed tools");
             installedTools = GetInstalledToolCommandsByAuthor(author);
             BuildAutocomplete(installedTools);
+            commandHistory.Clear();
+            CSRB.ValidateAndRepair();
             spinner.StopAndFlush();
             if (installedTools.Count == 0)
             {
@@ -149,6 +153,8 @@ namespace ToolBox
                 }
                 if (key.Key == ConsoleKey.Enter)
                 {
+                    commandHistory.Prepend(currentInput);
+                    CSRB.Save(currentInput);
                     ClearLine(Console.CursorTop);
                     Console.Write(prompt + currentInput);
                     Console.WriteLine();
